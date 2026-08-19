@@ -1,0 +1,18 @@
+version: 1
+server:
+  host: 127.0.0.1
+  port: 4310
+  dataDir: ~/.workflow-manager
+runtime:
+  portRange:
+    start: 3100
+    end: 3199
+  stopTimeoutMs: 8000
+  startupTimeoutMs: 120000
+sources:
+  - id: codex
+    type: codex-sessions
+    enabled: true
+    sessionsGlob: ~/.codex/sessions/**/*.jsonl
+# 仓库与仓库组不在 YAML 中配置；启动服务后从页面手动添加和关联。
+workspaces: []
