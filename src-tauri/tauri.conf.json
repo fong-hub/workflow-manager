@@ -5,7 +5,7 @@
   "identifier": "com.workflowmanager.desktop",
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwOTMxOEZDNkZGMkYzOTEKUldTUjgvSnYvQmlUa04wTHY3Ym14TTJtd0x4c2hBUXg2NS8yRlRGWVMwblgybGxyeTVNL05HcGEK",
       "endpoints": ["https://github.com/fong-hub/workflow-manager/releases/latest/download/latest.json"]
     }
   },
