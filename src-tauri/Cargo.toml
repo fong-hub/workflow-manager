@@ -1,0 +1,22 @@
+[package]
+name = "workflow-manager"
+version = "0.1.0"
+description = "Workflow Manager desktop application"
+authors = ["Workflow Manager"]
+edition = "2021"
+
+[lib]
+name = "workflow_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde_json = "1"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

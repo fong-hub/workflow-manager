@@ -542,6 +542,8 @@ function DetailPanel({
 }
 
 export function App() {
+  const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> }>();
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [filter, setFilter] = useState<ViewFilter>('all');
@@ -571,6 +573,22 @@ export function App() {
     const timer = window.setInterval(() => void refresh(), 15_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    void import('@tauri-apps/plugin-updater').then(async ({ check }) => {
+      const available = await check();
+      if (!available) return;
+      setUpdate({
+        version: available.version,
+        install: async () => {
+          await available.downloadAndInstall();
+          const { relaunch } = await import('@tauri-apps/plugin-process');
+          await relaunch();
+        },
+      });
+    }).catch(() => undefined);
+  }, []);
 
   const selected = workflows.find((workflow) => workflow.id === selectedId);
   const counts = useMemo(
@@ -602,6 +620,7 @@ export function App() {
 
   return (
     <main className="app-shell">
+      {update && <div className="update-banner"><span>新版本 {update.version} 已发布</span><button disabled={installingUpdate} onClick={() => { setInstallingUpdate(true); void update.install(); }} type="button">{installingUpdate ? '正在安装…' : '立即升级'}</button></div>}
       <div className="grain" />
       <header className="topbar">
         <div className="brand-mark"><span>WF</span></div>

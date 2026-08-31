@@ -1,9 +1,5 @@
 node_modules/
 dist/
-.workflow-manager/
-workflow-manager.local.yaml
-*.log
-.DS_Store
-# Local screenshots can contain repository names, branches and absolute paths.
-docs/workflow-foundry-preview.png
-.screenshots/
+release/
+src-tauri/target/
+src-tauri/gen/
