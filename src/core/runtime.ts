@@ -160,14 +160,23 @@ export class RuntimeManager {
     });
 
     child.once('exit', (exitCode) => {
-      this.processes.delete(key);
-      this.allocatedPorts.delete(port);
+      const isCurrentProcess = this.processes.get(key)?.child === child;
+      if (isCurrentProcess) {
+        this.processes.delete(key);
+      }
+      if (this.allocatedPorts.get(port) === key && isCurrentProcess) {
+        this.allocatedPorts.delete(port);
+      }
       if (!log.writableEnded) {
         log.write(
           `\n[workflow-manager] process exited with ${String(exitCode)} at ${new Date().toISOString()}\n`
         );
         log.end();
       }
+      // A timed-out stop may have been followed by a new start. In that case
+      // this late exit belongs to the previous instance and must not overwrite
+      // the replacement's state.
+      if (!isCurrentProcess && this.processes.has(key)) return;
       const existing = this.states.get(key);
       this.states.set(key, {
         status:
@@ -241,6 +250,17 @@ export class RuntimeManager {
         resolve();
       });
     });
+
+    // The exit event can arrive after the stop timeout (for example when a
+    // detached child process needs extra time to terminate). Do not retain
+    // stale in-memory ownership in that case; the next start still probes the
+    // real socket before allocating the port.
+    if (this.processes.get(key) === managed) {
+      this.processes.delete(key);
+    }
+    if (this.allocatedPorts.get(managed.port) === key) {
+      this.allocatedPorts.delete(managed.port);
+    }
 
     const stopped: RuntimeState = {
       ...this.getState(workflowId, repositoryId),
