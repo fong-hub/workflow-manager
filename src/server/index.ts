@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { loadConfig } from '../core/config.js';
 import { RepositoryRegistry } from '../core/registry.js';
 import { ReleaseManager } from '../core/release.js';
-import { RuntimeManager } from '../core/runtime.js';
+import { RuntimeManager, RuntimePortUnavailableError } from '../core/runtime.js';
 import { WorkflowStore } from '../core/store.js';
 import { WorkflowService } from '../core/workflows.js';
 
@@ -170,10 +170,17 @@ app.post(
   '/api/workflows/:workflowId/repositories/:repositoryId/runtime/start',
   async (request, reply) => {
     const params = repositoryRuntimeParams.parse(request.params);
+    const body = z
+      .object({ port: z.number().int().min(1).max(65_535).optional() })
+      .parse(request.body ?? {});
     const workflow = await workflows.get(params.workflowId);
     if (!workflow) return reply.code(404).send({ error: 'Workflow not found' });
     return reply.code(202).send({
-      runtime: await runtimes.start(workflow, params.repositoryId),
+      runtime: await runtimes.start(
+        workflow,
+        params.repositoryId,
+        body.port === undefined ? {} : { port: body.port }
+      ),
     });
   }
 );
@@ -240,7 +247,11 @@ app.post('/api/workflows/:workflowId/release', async (request, reply) => {
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
-  const statusCode = error instanceof z.ZodError ? 400 : 500;
+  const statusCode = error instanceof z.ZodError
+    ? 400
+    : error instanceof RuntimePortUnavailableError
+      ? 409
+      : 500;
   void reply.code(statusCode).send({
     error: error instanceof Error ? error.message : 'Unknown error',
   });

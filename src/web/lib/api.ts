@@ -55,10 +55,13 @@ export const api = {
     }),
   listWorkflows: (force = false) =>
     request<{ workflows: Workflow[] }>(`/api/workflows${force ? '?refresh=true' : ''}`),
-  startRuntime: (workflowId: string, repositoryId: string) =>
+  startRuntime: (workflowId: string, repositoryId: string, port?: number) =>
     request(
       `/api/workflows/${encodeURIComponent(workflowId)}/repositories/${encodeURIComponent(repositoryId)}/runtime/start`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: JSON.stringify(port === undefined ? {} : { port }),
+      }
     ),
   stopRuntime: (workflowId: string, repositoryId: string) =>
     request(

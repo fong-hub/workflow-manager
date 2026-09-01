@@ -290,6 +290,30 @@ button { color: inherit; }
   font-size: 8px;
 }
 .repository-runtime-meta code { color: var(--muted); font: 400 8px var(--mono); }
+.repository-runtime-meta .runtime-error { color: var(--red); }
+.runtime-port-field {
+  display: grid;
+  grid-template-columns: auto minmax(130px, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 8px;
+}
+.runtime-port-field > span { color: var(--ink); font-weight: 600; }
+.runtime-port-field input {
+  height: 32px;
+  min-width: 0;
+  border: 1px solid #354031;
+  background: #0d110d;
+  color: var(--lime);
+  padding: 0 10px;
+  font: 500 9px var(--mono);
+  outline: 0;
+}
+.runtime-port-field input:focus { border-color: rgba(199, 243, 107, .55); }
+.runtime-port-field input:disabled { color: var(--muted); opacity: .65; }
+.runtime-port-field small { grid-column: 2; color: #687264; font-size: 7px; line-height: 1.4; }
 .repository-runtime-actions { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 7px; }
 .repository-runtime-actions .primary-action,
 .repository-runtime-actions .secondary-action { min-height: 35px; width: auto; }

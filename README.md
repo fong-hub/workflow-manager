@@ -62,13 +62,15 @@ WORKFLOW_MANAGER_CONFIG=/absolute/path/config.yaml corepack pnpm dev
 - 仓库配置了 `runtime`：页面提供该仓库独立的启动、停止、打开和日志操作。
 - 仓库没有配置 `runtime`：页面标记为“仅代码”，不会被其他仓库的启动动作带起。
 - 启动一个仓库只分配该仓库自己的端口、PID 和日志，不隐式启动同工作流中的其他仓库。
+- 启动前会先检查并预留端口；端口已被系统进程或其他工作流占用时会立即拒绝启动，不执行 prepare/start 命令。
+- 页面可手动指定 `1-65535` 的端口；留空时才从 YAML 的 `runtime.portRange` 中自动选择可用端口。
 
 这允许前端 worktree 单独运行并继续访问 SIT 后端，而后端和契约仓库只保留代码改动。
 
 ## API
 
 - `GET /api/workflows`
-- `POST /api/workflows/:id/repositories/:repositoryId/runtime/start`
+- `POST /api/workflows/:id/repositories/:repositoryId/runtime/start`，可选 JSON 请求体：`{ "port": 3100 }`
 - `POST /api/workflows/:id/repositories/:repositoryId/runtime/stop`
 - `GET /api/workflows/:id/repositories/:repositoryId/runtime/log`
 - `POST /api/workflows/:id/accept`

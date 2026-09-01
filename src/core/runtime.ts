@@ -35,6 +35,11 @@ function defaultRuntimeState(): RuntimeState {
   return { status: 'stopped' };
 }
 
+/** A requested or automatically selected runtime port cannot be reserved. */
+export class RuntimePortUnavailableError extends Error {
+  override readonly name = 'RuntimePortUnavailableError';
+}
+
 /** Manages repository-level runtime processes and their independent ports. */
 export class RuntimeManager {
   private readonly states = new Map<string, RuntimeState>();
@@ -47,7 +52,11 @@ export class RuntimeManager {
     return this.states.get(this.runtimeKey(workflowId, repositoryId)) ?? defaultRuntimeState();
   }
 
-  async start(workflow: Workflow, repositoryId: string): Promise<RuntimeState> {
+  async start(
+    workflow: Workflow,
+    repositoryId: string,
+    options: { port?: number } = {}
+  ): Promise<RuntimeState> {
     const repository = workflow.repositories.find(
       (candidate) => candidate.repositoryId === repositoryId
     );
@@ -72,26 +81,52 @@ export class RuntimeManager {
       return current;
     }
 
-    const logDirectory = path.join(
-      this.config.server.dataDir,
-      'logs',
-      workflow.id.replaceAll(/[^a-zA-Z0-9_.-]/g, '_'),
-      repositoryId.replaceAll(/[^a-zA-Z0-9_.-]/g, '_')
-    );
-    await mkdir(logDirectory, { recursive: true, mode: 0o700 });
-    const logFile = path.join(logDirectory, 'runtime.log');
-    const log = createWriteStream(logFile, { flags: 'a', mode: 0o600 });
-    const preparingState: RuntimeState = { status: 'preparing', logFile };
+    // Select and reserve the port before any repository command runs so a
+    // conflict fails the start request immediately instead of after prepare.
+    const port = await this.allocatePort(key, options.port);
+    const variables = {
+      port,
+      worktree: repository.worktreePath,
+      workflowId: workflow.id,
+      repositoryId: repository.repositoryId,
+    };
+    const url = repository.runtime.healthCheckUrl
+      ? renderTemplate(repository.runtime.healthCheckUrl, variables)
+      : `http://127.0.0.1:${port}`;
+
+    let log: WriteStream;
+    let logFile: string;
+    try {
+      const logDirectory = path.join(
+        this.config.server.dataDir,
+        'logs',
+        workflow.id.replaceAll(/[^a-zA-Z0-9_.-]/g, '_'),
+        repositoryId.replaceAll(/[^a-zA-Z0-9_.-]/g, '_')
+      );
+      await mkdir(logDirectory, { recursive: true, mode: 0o700 });
+      logFile = path.join(logDirectory, 'runtime.log');
+      log = createWriteStream(logFile, { flags: 'a', mode: 0o600 });
+    } catch (error) {
+      this.releasePort(port, key);
+      throw error;
+    }
+
+    const preparingState: RuntimeState = { status: 'preparing', port, url, logFile };
     this.states.set(key, preparingState);
 
-    void this.launch(workflow, repository, log).catch((error: unknown) => {
+    void this.launch(workflow, repository, port, url, log).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
+      if (!this.processes.has(key)) {
+        this.releasePort(port, key);
+      }
       if (!log.writableEnded) {
         log.write(`\n[workflow-manager] failed: ${message}\n`);
         log.end();
       }
       this.states.set(key, {
         status: 'failed',
+        port,
+        url,
         error: message,
         exitedAt: new Date().toISOString(),
         logFile,
@@ -104,6 +139,8 @@ export class RuntimeManager {
   private async launch(
     workflow: Workflow,
     repository: WorkflowRepository,
+    port: number,
+    url: string,
     log: WriteStream
   ): Promise<void> {
     const runtime = repository.runtime!;
@@ -119,7 +156,14 @@ export class RuntimeManager {
       }
     }
 
-    const port = await this.allocatePort(key);
+    // Preparation can be slow. Probe once more immediately before spawning
+    // to catch an external process that claimed the reserved port meanwhile.
+    if (!(await portAvailable(port, this.config.server.host))) {
+      throw new RuntimePortUnavailableError(
+        `Runtime port ${port} became occupied during preparation`
+      );
+    }
+
     const variables = {
       port,
       worktree: repository.worktreePath,
@@ -127,9 +171,6 @@ export class RuntimeManager {
       repositoryId: repository.repositoryId,
     };
     const command = renderTemplate(runtime.startCommand, variables);
-    const url = runtime.healthCheckUrl
-      ? renderTemplate(runtime.healthCheckUrl, variables)
-      : `http://127.0.0.1:${port}`;
     const logFile = this.states.get(key)?.logFile;
     this.states.set(key, {
       status: 'starting',
@@ -329,7 +370,29 @@ export class RuntimeManager {
     );
   }
 
-  private async allocatePort(ownerKey: string): Promise<number> {
+  private async allocatePort(
+    ownerKey: string,
+    requestedPort?: number
+  ): Promise<number> {
+    if (requestedPort !== undefined) {
+      if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65_535) {
+        throw new Error('Runtime port must be an integer between 1 and 65535');
+      }
+      const owner = this.allocatedPorts.get(requestedPort);
+      if (owner && owner !== ownerKey) {
+        throw new RuntimePortUnavailableError(
+          `Runtime port ${requestedPort} is already allocated by another workflow`
+        );
+      }
+      if (!(await portAvailable(requestedPort, this.config.server.host))) {
+        throw new RuntimePortUnavailableError(
+          `Runtime port ${requestedPort} is already in use`
+        );
+      }
+      this.allocatedPorts.set(requestedPort, ownerKey);
+      return requestedPort;
+    }
+
     for (
       let port = this.config.runtime.portRange.start;
       port <= this.config.runtime.portRange.end;
@@ -341,7 +404,15 @@ export class RuntimeManager {
         return port;
       }
     }
-    throw new Error('No available runtime port in the configured range');
+    throw new RuntimePortUnavailableError(
+      `No available runtime port in configured range ${this.config.runtime.portRange.start}-${this.config.runtime.portRange.end}`
+    );
+  }
+
+  private releasePort(port: number, ownerKey: string): void {
+    if (this.allocatedPorts.get(port) === ownerKey) {
+      this.allocatedPorts.delete(port);
+    }
   }
 
   private runShell(

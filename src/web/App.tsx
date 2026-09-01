@@ -176,6 +176,17 @@ function DetailPanel({
   const [note, setNote] = useState('');
   const [preflight, setPreflight] = useState<PreflightCheck[]>([]);
   const [error, setError] = useState<string>();
+  const [runtimePorts, setRuntimePorts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      workflow.repositories
+        .filter((repository) => repository.runtime)
+        .map((repository) => [
+          repository.repositoryId,
+          workflow.runtimes[repository.repositoryId]?.port?.toString() ?? '',
+        ])
+    )
+  );
+  const runtimePortsWorkflowId = useRef(workflow.id);
   const [targets, setTargets] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       workflow.repositories
@@ -200,6 +211,20 @@ function DetailPanel({
   useEffect(() => {
     setPreflight([]);
     setError(undefined);
+    setRuntimePorts((current) => {
+      const workflowChanged = runtimePortsWorkflowId.current !== workflow.id;
+      runtimePortsWorkflowId.current = workflow.id;
+      return Object.fromEntries(
+        workflow.repositories
+          .filter((repository) => repository.runtime)
+          .map((repository) => [
+            repository.repositoryId,
+            workflowChanged
+              ? workflow.runtimes[repository.repositoryId]?.port?.toString() ?? ''
+              : current[repository.repositoryId] ?? '',
+          ])
+      );
+    });
     setTargets(
       Object.fromEntries(
         workflow.repositories
@@ -220,7 +245,7 @@ function DetailPanel({
           ])
       )
     );
-  }, [workflow.id, workflow.repositories]);
+  }, [workflow.id, workflow.repositories, workflow.runtimes]);
 
 
   const selectedTargets = useMemo<ReleaseTargetSelection[]>(
@@ -400,14 +425,44 @@ function DetailPanel({
                       <span className={`runtime-state ${runtime.status}`}>{runtime.status}</span>
                     </div>
                     <div className="repository-runtime-meta">
-                      <span>{runtime.url ?? '启动后自动分配独立端口'}</span>
+                      <span className={runtime.error ? 'runtime-error' : ''}>
+                        {runtime.error ?? runtime.url ?? '启动后自动分配独立端口'}
+                      </span>
                       <code>{runtime.pid ? `PID ${runtime.pid}` : 'STOPPED'}</code>
                     </div>
+                    <label className="runtime-port-field">
+                      <span>运行端口</span>
+                      <input
+                        disabled={Boolean(busy) || ['running', 'preparing', 'starting'].includes(runtime.status)}
+                        inputMode="numeric"
+                        max={65535}
+                        min={1}
+                        onChange={(event) => setRuntimePorts((current) => ({
+                          ...current,
+                          [repository.repositoryId]: event.target.value,
+                        }))}
+                        placeholder="留空则自动分配"
+                        type="number"
+                        value={runtimePorts[repository.repositoryId] ?? ''}
+                      />
+                      <small>启动前校验占用；留空时从配置端口池自动选择。</small>
+                    </label>
                     <div className="repository-runtime-actions">
                       <button
                         className="primary-action"
                         disabled={Boolean(busy) || ['running', 'preparing', 'starting'].includes(runtime.status)}
-                        onClick={() => runAction(`start:${repository.repositoryId}`, () => api.startRuntime(workflow.id, repository.repositoryId))}
+                        onClick={() => {
+                          const value = runtimePorts[repository.repositoryId]?.trim() ?? '';
+                          const port = value ? Number(value) : undefined;
+                          if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65_535)) {
+                            setError('运行端口必须是 1 到 65535 之间的整数。');
+                            return;
+                          }
+                          void runAction(
+                            `start:${repository.repositoryId}`,
+                            () => api.startRuntime(workflow.id, repository.repositoryId, port)
+                          );
+                        }}
                         type="button"
                       >
                         {startBusy ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
