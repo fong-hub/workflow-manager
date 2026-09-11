@@ -22,6 +22,7 @@ const store = new WorkflowStore(config.server.dataDir);
 await store.initialize(config.workspaces);
 const registry = new RepositoryRegistry(store);
 const runtimes = new RuntimeManager(config);
+await runtimes.initialize();
 const workflows = new WorkflowService(config, store, runtimes);
 const releases = new ReleaseManager(config, store);
 
@@ -268,3 +269,16 @@ try {
 }
 
 await app.listen({ host: config.server.host, port: config.server.port });
+
+let shuttingDown = false;
+const shutdown = async (signal: NodeJS.Signals) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  app.log.info(`Received ${signal}; stopping managed worktree runtimes.`);
+  await runtimes.shutdown();
+  await app.close();
+  process.exit(0);
+};
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));

@@ -77,9 +77,16 @@ WORKFLOW_MANAGER_CONFIG=/absolute/path/config.yaml corepack pnpm dev
 - `POST /api/workflows/:id/release/preflight`
 - `POST /api/workflows/:id/release`
 
+## Runtime 生命周期与端口管控
+
+- Runtime 状态持久化在数据目录的 `runtime-state.json`，包含工作流、仓库、worktree、端口、PID 和进程启动标记。
+- Workflow Manager 正常收到 `SIGINT` / `SIGTERM` 或退出时，会先停止自己管理的 worktree Runtime，再退出，避免留下端口占用。
+- 如果桌面进程被强制结束或服务异常崩溃，下一次启动会读取持久化状态：仍存活且 PID 未被复用的 Runtime 会被重新接管，历史端口继续归该工作流所有；已退出或 PID 已复用的记录会标记为失败并释放端口。
+- 端口分配仍然必须同时通过持久化工作流占用表和操作系统 socket 检查；仅仅端口可用不能绕过历史 Runtime 的管控。
+
 ## 当前限制
 
-- 运行进程登记目前保存在服务内存中；服务重启后会重新扫描端口，但不会接管旧进程。
+- 被外部脚本以脱离 Workflow Manager 进程组的方式启动的服务，无法仅凭端口反推出所属 worktree；这类端口仍会被 socket 检查拦截，但需要用户手动确认外部进程。
 - 跨仓库发布不具备原子性；前序仓库成功、后序仓库失败时会返回部分发布结果。
 - 自动会话关联只是提示。会话从主工作区启动、随后才创建 worktree 时，应该以后续显式绑定能力作为最终事实来源。
 

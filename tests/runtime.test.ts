@@ -66,6 +66,16 @@ async function occupyAvailablePort(): Promise<number> {
   return address.port;
 }
 
+async function canListenOnPort(port: number): Promise<boolean> {
+  const server = net.createServer();
+  return new Promise((resolve) => {
+    server.once('error', () => resolve(false));
+    server.listen({ host: '127.0.0.1', port }, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
 function createConfig(
   dataDir: string,
   portRange: { start: number; end: number }
@@ -226,5 +236,51 @@ describe('runtime manager', () => {
     );
     expect(manager.getState(workflow.id, 'app')).toEqual({ status: 'stopped' });
     await expect(access(markerFile)).rejects.toThrow();
+  });
+
+  it('persists and adopts a live worktree runtime after the manager restarts', async () => {
+    const dataDir = await createDataDirectory();
+    const port = await findAvailablePort();
+    const workflow = createWorkflow(dataDir);
+    const config = createConfig(dataDir, { start: port, end: port });
+    const managerBeforeRestart = new RuntimeManager(config);
+
+    await managerBeforeRestart.start(workflow, 'app', { port });
+    const beforeRestart = await waitForStatus(
+      managerBeforeRestart,
+      workflow.id,
+      'app',
+      'running'
+    );
+    expect(beforeRestart.port).toBe(port);
+
+    const managerAfterRestart = new RuntimeManager(config);
+    await managerAfterRestart.initialize();
+    const restored = managerAfterRestart.getState(workflow.id, 'app');
+    expect(restored.status).toBe('running');
+    expect(restored.pid).toBe(beforeRestart.pid);
+    expect(restored.port).toBe(port);
+
+    // The restored manager owns the old port and can stop the process even
+    // though it no longer has the original ChildProcess object in memory.
+    await managerAfterRestart.stop(workflow.id, 'app');
+    expect(managerAfterRestart.getState(workflow.id, 'app').status).toBe('stopped');
+    expect(await canListenOnPort(port)).toBe(true);
+  });
+
+  it('stops child runtimes and releases their ports during service shutdown', async () => {
+    const dataDir = await createDataDirectory();
+    const port = await findAvailablePort();
+    const workflow = createWorkflow(dataDir);
+    const manager = new RuntimeManager(
+      createConfig(dataDir, { start: port, end: port })
+    );
+
+    await manager.start(workflow, 'app', { port });
+    await waitForStatus(manager, workflow.id, 'app', 'running');
+    await manager.shutdown();
+
+    expect(manager.getState(workflow.id, 'app').status).toBe('stopped');
+    expect(await canListenOnPort(port)).toBe(true);
   });
 });
